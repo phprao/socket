@@ -20,6 +20,7 @@ if( socket_listen($sock, 4) == FALSE ){
 }
 
 $count = 0;
+$len = 8129;// 每次读取数据的字节数
 
 do{
     // 4. 阻塞，等待客户端请求
@@ -29,20 +30,25 @@ do{
     } else {
         array_push($connList,(int)$msgsock);
         // 5. 向客户端写入信息
-        $msg = 'server response '.(int)$msgsock;
+        $msg = "server response ".(int)$msgsock;
         socket_write($msgsock, $msg, strlen($msg));
 
-        // 5. 读取客户端信息
-        $buf = socket_read($msgsock, 8192);
-        $talkback = $buf.PHP_EOL;
-        echo $talkback;
+        // 5. 读取客户端全部信息
+        $talkback = '';
+        do{
+            $buf = @socket_read($msgsock, $len);
+            $talkback .= $buf;
+            if(strlen($buf) < $len){
+                break;
+            }
+        }while(true);
+
+        echo $talkback.PHP_EOL;
+
         print_r($connList);
         echo PHP_EOL;
         
     }
-
-    // 6. 关闭socket
-    //socket_close($msgsock);
 
 }while(true);
 
