@@ -22,28 +22,23 @@ if ($result == FALSE) {
 
 $in = 'student ' . (int)$socket . ' come in';
 
-sleep(10);// 制造客户端阻塞，观察服务端
-
 // 3. 向服务端写入
 if (!socket_write($socket, $in, strlen($in))) {
     echo 'write fail: ' . socket_strerror(socket_last_error());
 }
 
-$getMsg = '';
 $len    = 8129;// 每次读取数据的字节数
 
-// 4. 从服务端读取全部的数据
-do {
-    $out    = @socket_read($socket, $len);
-    $getMsg .= $out;
-    if (strlen($out) < $len) {
-        break;
-    }
-} while (true);
+socket_set_nonblock($socket);
 
-echo $getMsg . PHP_EOL;
+// 4. 从服务端读取全部的数据
+$out = @socket_read($socket, $len);
+
+echo 'no block tag'.PHP_EOL;
+
+echo $out . PHP_EOL;
 
 // 5. 关闭
-echo 'close socket...' . PHP_EOL;
-socket_close($socket);
-echo 'closed ok....';
+// echo 'close socket...' . PHP_EOL;
+// socket_close($socket);
+// echo 'closed ok....';

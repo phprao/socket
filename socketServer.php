@@ -30,6 +30,8 @@ do {
     } else {
         array_push($connList, (int)$msgsock);
 
+        echo 'connect in...'.PHP_EOL;
+
         // 5. 读取客户端全部信息
         $talkback = '';
         do {
@@ -47,7 +49,7 @@ do {
 
         socket_write($msgsock, $msg, strlen($msg));
 
-        print_r($connList);
+        // print_r($connList);
         echo PHP_EOL;
 
     }
