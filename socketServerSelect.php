@@ -41,7 +41,7 @@ class socketServerSelect
     {
         $this->initSettings();
         $ret = $this->createServer($host, $port);
-        if(!$ret){
+        if (!$ret) {
             exit($this->getErrorMsg() . PHP_EOL);
         }
     }
@@ -147,11 +147,11 @@ class socketServerSelect
                             if (isset($this->events['receive'])) {
                                 call_user_func($this->events['receive'], $this, (int)$fd, $buf);
                             }
-                        }else{
+                        } else {
                             // 勉强定义为客户端断开
                             $this->deleteConn((int)$fd);
                         }
-                    }else{
+                    } else {
                         $this->deleteConn((int)$fd);
                     }
                 }
@@ -171,6 +171,18 @@ class socketServerSelect
         }
 
         $this->deleteConn($socketId);
+        return false;
+    }
+
+    public function formatHttp($data)
+    {
+        $ret = "HTTP/1.1 200 ok\r\n";
+        $ret .= "Content-Type: text/html; charset=utf-8\r\n";
+        $ret .= "Content-Length: " . strlen($data) . "\r\n\r\n";
+
+        $ret .= $data . "\r\n";
+
+        return $ret;
     }
 
     protected function deleteConn($socketId)
@@ -200,7 +212,11 @@ $socketServer->on('receive', function ($socketServer, $socketId, $data) {
     echo '[read] ';
     echo 'receive data : ' . $data . ' from ' . $socketId . PHP_EOL;
 
-    $socketServer->send($socketId, 'I am server...');
+    $msg = $socketServer->formatHttp('I am server...');
+    $re  = $socketServer->send($socketId, $msg);
+    if ($re) {
+        echo 'response to ' . $socketId . PHP_EOL;
+    }
 });
 
 $socketServer->on('close', function ($socketServer, $socketId) {
