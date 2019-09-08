@@ -49,8 +49,10 @@ class socketServerSelect
     protected function initSettings()
     {
         $this->settings = [
-            'backlog' => 128,// 允许等待连接的请求数
-            'timeout' => 3,// 每次select阻塞等待多少秒，获取在这段时间内的状态变化；0表示不等待，获取这个时刻的状态变化
+            // 允许等待连接的请求数
+            'backlog' => 128,
+            // 每次select阻塞等待多少秒，获取在这段时间内的状态变化；0表示不等待，获取这个时刻的状态变化
+            'timeout' => 3,
         ];
     }
 
@@ -99,7 +101,8 @@ class socketServerSelect
     {
         // 4、轮训执行系统调用socket_select
         do {
-            $readFds      = array_merge($this->clients, array($this->serverSocket));// 可读监听数组，将主socket加入，用以处理客户端连接
+            // 可读监听数组，将主socket加入，用以处理客户端连接
+            $readFds      = array_merge($this->clients, array($this->serverSocket));
             $writeFds     = null;// 可写监听数组
             $exceptionFds = null;// 异常监听数组
 
@@ -222,5 +225,5 @@ $socketServer->on('receive', function ($socketServer, $socketId, $data) {
 $socketServer->on('close', function ($socketServer, $socketId) {
     echo 'client close...' . $socketId . PHP_EOL;
 });
-
+// 启动服务器
 $socketServer->start();
