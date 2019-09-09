@@ -57,7 +57,7 @@ class TcpPressure{
                 }
             }
         }
-        
+
         $this->setParams($param);
     }
 
