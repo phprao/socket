@@ -9,6 +9,11 @@
  * ----------------------------------------------------------
  */
 
+/**
+ * 虽然多线性能更好，但是考虑到多线程需要安装扩展，所以选择多进程。
+ * 适用于Linux
+ */
+
 require_once './socketClient.php';
 
 class TcpPressure{
@@ -46,13 +51,13 @@ class TcpPressure{
                 continue;
             }
 
-            if(preg_match('/^(-\S)([\s\S]*)/', $val, $matche)){
+            if(preg_match('/^(-\S)(.*)$/', $val, $matche)){
                 if(isset($matche[1]) && isset($matche[2])){
                     $param[$matche[1]] = $matche[2];
                 }
             }
         }
-
+        
         $this->setParams($param);
     }
 
