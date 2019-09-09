@@ -2,7 +2,8 @@
 error_reporting(E_ALL);
 set_time_limit(0);
 
-class socketClient{
+class socketClient
+{
     protected $errorCode;
     protected $errorMsg;
     protected $len = 8129;// 每次读取数据的字节数
@@ -32,15 +33,16 @@ class socketClient{
         $this->setTimeout($rcvtimeo, $sndtimeo);
     }
 
-    protected function setTimeout($rcvtimeo, $sndtimeo){
-        if(!is_null($rcvtimeo) && is_int($rcvtimeo)){
+    protected function setTimeout($rcvtimeo, $sndtimeo)
+    {
+        if (!is_null($rcvtimeo) && is_int($rcvtimeo)) {
             $this->rcvtimeo = $rcvtimeo;
         }
-        if(!is_null($sndtimeo) && is_int($sndtimeo)){
+        if (!is_null($sndtimeo) && is_int($sndtimeo)) {
             $this->sndtimeo = $sndtimeo;
         }
-        socket_set_option($this->client, SOL_SOCKET, SO_RCVTIMEO, ['sec'=>$this->rcvtimeo, 'usec'=>0]);  // 发送超时
-        socket_set_option($this->client, SOL_SOCKET, SO_SNDTIMEO, ['sec'=>$this->sndtimeo, 'usec'=>0]);  // 接收超时
+        socket_set_option($this->client, SOL_SOCKET, SO_RCVTIMEO, ['sec' => $this->rcvtimeo, 'usec' => 0]);  // 发送超时
+        socket_set_option($this->client, SOL_SOCKET, SO_SNDTIMEO, ['sec' => $this->sndtimeo, 'usec' => 0]);  // 接收超时
     }
 
     protected function connectTo($host, $port)
@@ -99,8 +101,11 @@ class socketClient{
     }
 }
 
-$socketClient = new socketClient('127.0.0.1', 8888);
-$re = $socketClient->send('name', function($socketClient, $data){
-    var_dump($data);
-    var_dump($socketClient->getErrorMsg());
-});
+// 使用示例
+
+// $socketClient = new socketClient('127.0.0.1', 8888);
+//
+// $re = $socketClient->send('name', function($socketClient, $data){
+//     var_dump($data);
+//     var_dump($socketClient->getErrorMsg());
+// });
