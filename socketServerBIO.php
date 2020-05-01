@@ -1,17 +1,8 @@
 <?php
-/**
- * ----------------------------------------------------------
- * date: 2019/9/6 11:45
- * ----------------------------------------------------------
- * author: Raoxiaoya
- * ----------------------------------------------------------
- * describe: socket_select 非阻塞服务器
- * ----------------------------------------------------------
- */
 
 set_time_limit(0);
 
-class socketServerSelect
+class socketServerBIO
 {
     protected $errorCode;
     protected $errorMsg;
@@ -51,12 +42,7 @@ class socketServerSelect
         $this->settings = [
             // 允许等待连接的请求数
             'backlog' => 128,
-
-            /**
-             * 每次select阻塞等待多少秒，获取在这段时间内的状态变化；
-             * 0表示不等待，获取这个时刻的状态变化；
-             * NULL表示阻塞等待直到有返回。
-             */
+            // 每次select阻塞等待多少秒，获取在这段时间内的状态变化；0表示不等待，获取这个时刻的状态变化
             'timeout' => 3,
         ];
     }
@@ -87,9 +73,6 @@ class socketServerSelect
             return false;
         }
 
-        // 将服务的socket设置为非阻塞
-        socket_set_nonblock($this->serverSocket);
-
         // 3. 监听
         if (socket_listen($this->serverSocket, $this->settings['backlog']) == FALSE) {
             $this->setError(1002, socket_strerror(socket_last_error()));
@@ -107,69 +90,34 @@ class socketServerSelect
 
     public function start()
     {
-        // 4、轮训执行系统调用socket_select
         do {
-            // 可读监听数组，将主socket加入，用以处理客户端连接
-            $readFds      = array_merge($this->clients, array($this->serverSocket));
-            $writeFds     = null;// 可写监听数组
-            $exceptionFds = null;// 异常监听数组
-
-            $ret = socket_select($readFds, $writeFds, $exceptionFds, $this->settings['timeout']);
-            if ($ret < 1 || empty($readFds)) {
+            // 4. 阻塞，等待客户端请求
+            if (($conn = socket_accept($this->serverSocket)) === FALSE) {
+                $this->setError(1003, socket_strerror(socket_last_error()));
                 continue;
-            }
-
-            // 处理异常的状态
-            if (!empty($exceptionFds)) {
-                foreach ($exceptionFds as $efd) {
-                    $this->deleteConn((int)$efd);
-                }
-            }
-
-            // 处理可读的状态
-            if (in_array($this->serverSocket, $readFds)) {
-                /**
-                 * 1、处理新客户端的连接，此处并不会阻塞等待连接，因为已经有待处理的连接了。
-                 * 2、如果多个连接同时达到，那么只会一个一个的接收，比如10个客户端同时发起连接请求，
-                 * 第一次select，$readFds中有一个serverSocket对象，调用socket_accept接收第一个连接请求,其他9个请求处于等待状态。
-                 * 第二次select，$readFds中有一个serverSocket对象，调用socket_accept接收第二个连接请求,其他8个请求处于等待状态。
-                 * ......
-                 * 直到所有的请求都accept完毕。
-                 */
-                $conn = socket_accept($this->serverSocket);
-                if ($conn === FALSE) {
-                    $this->setError(1003, socket_strerror(socket_last_error()));
-                } else {
-                    socket_set_nonblock($conn);
-                    $no                 = (int)$conn;
-                    $this->clients[$no] = $conn;
-                }
-                // 处理完就该移除了
-                $keyOfThis = array_search($this->serverSocket, $readFds);
-                unset($readFds[$keyOfThis]);
+            } else {
+                $no                 = (int)$conn;
+                $this->clients[$no] = $conn;
 
                 if (isset($this->events['connect']) && $conn) {
                     call_user_func($this->events['connect'], $this, $no);
                 }
-            }
 
-            // 遍历剩余的可读fd，读取信息
-            if (!empty($readFds)) {
-                foreach ($readFds as $fd) {
-                    if (is_resource($fd)) {
-                        // 读取客户端全部信息
-                        $buf = socket_read($fd, $this->len);
-                        if ($buf === false) {
-                            $this->deleteConn((int)$fd);
-                        } else {
-                            if (isset($this->events['receive'])) {
-                                call_user_func($this->events['receive'], $this, (int)$fd, $buf);
-                            }
-                        }
+                // 5. 读取客户端全部信息
+                if (is_resource($conn)) {
+                    // 读取客户端全部信息
+                    $buf = socket_read($conn, $this->len);
+                    if ($buf === FALSE) {
+                        $this->deleteConn((int)$conn);
                     } else {
-                        $this->deleteConn((int)$fd);
+                        if (isset($this->events['receive'])) {
+                            call_user_func($this->events['receive'], $this, (int)$conn, $buf);
+                        }
                     }
+                } else {
+                    $this->deleteConn((int)$conn);
                 }
+
             }
 
         } while (true);
@@ -214,15 +162,13 @@ class socketServerSelect
     }
 }
 
-$socketServer = new socketServerSelect('127.0.0.1', 8888);
+$socketServer = new socketServerBIO('127.0.0.1', 8888);
 
 $socketServer->on('connect', function ($socketServer, $socketId) {
-    echo '[read] ';
     echo 'connect in...' . $socketId . PHP_EOL;
 });
 
 $socketServer->on('receive', function ($socketServer, $socketId, $data) {
-    echo '[read] ';
     echo 'receive data : ' . $data . ' from ' . $socketId . PHP_EOL;
 
     $msg = $socketServer->formatHttp('I am server...');
