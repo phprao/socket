@@ -4,37 +4,16 @@ set_time_limit(0);
 
 class socketServerBIO
 {
-    protected $errorCode;
-    protected $errorMsg;
     protected $len = 8129;// 每次读取数据的字节数
     protected $events = [];
     protected $serverSocket;
     protected $settings = [];
     protected $clients = [];// 连接的客户端fd
 
-    /**
-     * @return mixed
-     */
-    public function getErrorCode()
-    {
-        return $this->errorCode;
-    }
-
-    /**
-     * @return mixed
-     */
-    public function getErrorMsg()
-    {
-        return $this->errorMsg;
-    }
-
     public function __construct($host, $port)
     {
         $this->initSettings();
-        $ret = $this->createServer($host, $port);
-        if (!$ret) {
-            exit($this->getErrorMsg() . PHP_EOL);
-        }
+        $this->createServer($host, $port);
     }
 
     protected function initSettings()
@@ -60,40 +39,31 @@ class socketServerBIO
     protected function createServer($host, $port)
     {
         // 1. 创建
-        if (($sock = socket_create(AF_INET, SOCK_STREAM, SOL_TCP)) == FALSE) {
-            $this->setError(1000, socket_strerror(socket_last_error()));
-            return false;
+        if (($sock = socket_create(AF_INET, SOCK_STREAM, SOL_TCP)) == false) {
+            throw new \Exception(socket_strerror(socket_last_error()), socket_last_error());
         } else {
             $this->serverSocket = $sock;
         }
 
         // 2. 绑定
-        if (socket_bind($this->serverSocket, $host, $port) == FALSE) {
-            $this->setError(1001, socket_strerror(socket_last_error()));
-            return false;
+        if (socket_bind($this->serverSocket, $host, $port) == false) {
+            throw new \Exception(socket_strerror(socket_last_error()), socket_last_error());
         }
 
         // 3. 监听
-        if (socket_listen($this->serverSocket, $this->settings['backlog']) == FALSE) {
-            $this->setError(1002, socket_strerror(socket_last_error()));
-            return false;
+        if (socket_listen($this->serverSocket, $this->settings['backlog']) == false) {
+            throw new \Exception(socket_strerror(socket_last_error()), socket_last_error());
         }
 
         return true;
-    }
-
-    protected function setError($code, $msg)
-    {
-        $this->errorCode = $code;
-        $this->errorMsg  = $msg;
     }
 
     public function start()
     {
         do {
             // 4. 阻塞，等待客户端请求
-            if (($conn = socket_accept($this->serverSocket)) === FALSE) {
-                $this->setError(1003, socket_strerror(socket_last_error()));
+            if (($conn = socket_accept($this->serverSocket)) === false) {
+                echo socket_strerror(socket_last_error()) . PHP_EOL;
                 continue;
             } else {
                 $no                 = (int)$conn;
@@ -103,11 +73,10 @@ class socketServerBIO
                     call_user_func($this->events['connect'], $this, $no);
                 }
 
-                // 5. 读取客户端全部信息
+                // 5. 阻塞，读取客户端全部信息，如果此连接不发来数据，那么服务将一直阻塞在这里啥也干不了。
                 if (is_resource($conn)) {
-                    // 读取客户端全部信息
-                    $buf = socket_read($conn, $this->len);
-                    if ($buf === FALSE) {
+                    $buf = $this->read($conn, $this->len);
+                    if ($buf === false) {
                         $this->deleteConn((int)$conn);
                     } else {
                         if (isset($this->events['receive'])) {
@@ -117,39 +86,64 @@ class socketServerBIO
                 } else {
                     $this->deleteConn((int)$conn);
                 }
-
             }
 
         } while (true);
     }
 
+    public function read($socket, $len)
+    {
+        $getMsg = '';
+
+        do {
+            $out = socket_read($socket, $len);
+            if ($out === false) {
+                return false;
+            }
+            $getMsg .= $out;
+            if (strlen($out) < $len) {
+                break;
+            }
+        } while (true);
+
+        return $getMsg;
+    }
+
     public function send($socketId, $data)
     {
         if (isset($this->clients[$socketId]) && is_resource($this->clients[$socketId])) {
-            if (@socket_write($this->clients[$socketId], $data, strlen($data))) {
+            if (@socket_write($this->clients[$socketId], $data, strlen($data)) !== false) {
                 return true;
             }
         }
 
-        $this->deleteConn($socketId);
         return false;
     }
 
     public function formatHttp($data)
     {
-        $ret = "HTTP/1.1 200 ok\r\n";
-        $ret .= "Content-Type: text/html; charset=utf-8\r\n";
+        /**
+         * HTTP/1.1 200 OK
+         * Date: Fri, 01 May 2020 12:00:57 GMT
+         * Connection: close
+         * X-Powered-By: PHP/7.2.27
+         * Content-type: text/html; charset=UTF-8
+         */
+        $ret = "HTTP/1.1 200 OK\r\n";
+        $ret .= "Date: " . gmdate("D, d M Y H:i:s", time()) . " GMT\r\n";
+        $ret .= "Connection: close\r\n";
+        $ret .= "Content-type: text/html; charset=UTF-8\r\n";
         $ret .= "Content-Length: " . strlen($data) . "\r\n\r\n";
 
-        $ret .= $data . "\r\n";
+        $ret .= $data;
 
         return $ret;
     }
 
-    protected function deleteConn($socketId)
+    public function deleteConn($socketId)
     {
         @socket_shutdown($this->clients[$socketId]);
-        socket_close($this->clients[$socketId]);
+        @socket_close($this->clients[$socketId]);
         unset($this->clients[$socketId]);
         if (isset($this->events['close'])) {
             call_user_func($this->events['close'], $this, $socketId);
@@ -158,11 +152,13 @@ class socketServerBIO
 
     public function __destruct()
     {
-        socket_close($this->serverSocket);
+        @socket_close($this->serverSocket);
     }
 }
 
-$socketServer = new socketServerBIO('127.0.0.1', 8888);
+/*************************************************************************************/
+
+$socketServer = new socketServerBIO('0.0.0.0', 8888);
 
 $socketServer->on('connect', function ($socketServer, $socketId) {
     echo 'connect in...' . $socketId . PHP_EOL;
@@ -171,15 +167,24 @@ $socketServer->on('connect', function ($socketServer, $socketId) {
 $socketServer->on('receive', function ($socketServer, $socketId, $data) {
     echo 'receive data : ' . $data . ' from ' . $socketId . PHP_EOL;
 
-    $msg = $socketServer->formatHttp('I am server...');
-    $re  = $socketServer->send($socketId, $msg);
+    $msg = $socketServer->formatHttp('I am server...' . PHP_EOL);
+
+    $re = $socketServer->send($socketId, $msg);
     if ($re) {
         echo 'response to ' . $socketId . PHP_EOL;
+    } else {
+        $socketServer->deleteConn($socketId);
     }
+
+    // 模拟Http服务器
+    //$socketServer->deleteConn($socketId);
 });
 
 $socketServer->on('close', function ($socketServer, $socketId) {
     echo 'client close...' . $socketId . PHP_EOL;
 });
+
 // 启动服务器
 $socketServer->start();
+
+
