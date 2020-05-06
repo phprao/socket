@@ -238,7 +238,7 @@ $socketServer->on('receive', function ($socketServer, $socketId, $data) {
     }
 
     // 模拟Http服务器
-    $socketServer->deleteConn($socketId);
+    //$socketServer->deleteConn($socketId);
 });
 
 $socketServer->on('close', function ($socketServer, $socketId) {
