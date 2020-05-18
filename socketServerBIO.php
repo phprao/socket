@@ -1,4 +1,12 @@
 <?php
+/**
+ * 服务端
+ *
+ * 阻塞式 + 同步
+ *
+ * 同步：主动轮训可视为同步的
+ * 异步：被动接收通知，一般是事件通知机制
+ */
 
 set_time_limit(0);
 
@@ -49,6 +57,9 @@ class socketServerBIO
         if (socket_bind($this->serverSocket, $host, $port) == false) {
             throw new \Exception(socket_strerror(socket_last_error()), socket_last_error());
         }
+
+        // 设置端口重用，否则每次重启要等待1-2分钟
+        socket_get_option($this->serverSocket, SOL_SOCKET, SO_REUSEADDR);
 
         // 3. 监听
         if (socket_listen($this->serverSocket, $this->settings['backlog']) == false) {
@@ -118,6 +129,13 @@ class socketServerBIO
         }
 
         return false;
+    }
+
+    public function getClientInfo($socketId)
+    {
+        // 获取客户端信息
+        socket_getpeername($this->clients[$socketId], $addr, $port);
+        return ['ip'=>$addr, 'port'=>$port];
     }
 
     public function formatHttp($data)

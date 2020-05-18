@@ -14,7 +14,7 @@
  * 适用于Linux
  */
 
-require_once './socketClient.php';
+require_once './socketClientBIO.php';
 
 class TcpPressure{
     protected $clientNum;

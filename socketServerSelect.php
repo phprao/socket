@@ -1,12 +1,8 @@
 <?php
 /**
- * ----------------------------------------------------------
- * date: 2019/9/6 11:45
- * ----------------------------------------------------------
- * author: Raoxiaoya
- * ----------------------------------------------------------
- * describe: socket_select 非阻塞服务器
- * ----------------------------------------------------------
+ * 服务端
+ *
+ * 非阻塞式 + 同步 + IO多路复用器select
  */
 
 set_time_limit(0);
@@ -67,6 +63,9 @@ class socketServerSelect
         // 将服务的socket设置为非阻塞
         socket_set_nonblock($this->serverSocket);
 
+        // 设置端口重用，否则每次重启要等待1-2分钟
+        socket_get_option($this->serverSocket, SOL_SOCKET, SO_REUSEADDR);
+
         // 3. 监听
         if (socket_listen($this->serverSocket, $this->settings['backlog']) == false) {
             throw new \Exception(socket_strerror(socket_last_error()), socket_last_error());
@@ -78,12 +77,17 @@ class socketServerSelect
     public function start()
     {
         // 4、轮训执行系统调用socket_select
-        do {
+        while(true)
+        {
             // 可读监听数组，将主socket加入，用以处理客户端连接
             $readFds      = array_merge($this->clients, array($this->serverSocket));
             $writeFds     = null;// 可写监听数组
             $exceptionFds = null;// 异常监听数组
 
+            /**
+             * 对于 $readFds, $writeFds, $exceptionFds 如果有返回，那么应用程序应该去处理，如果没有处理，或者在读数据的时候没有
+             * 读完，那么后面会重复返回直到被处理为止。
+             */
             $ret = socket_select($readFds, $writeFds, $exceptionFds, $this->settings['timeout']);
             if ($ret < 1 || empty($readFds)) {
                 continue;
@@ -100,7 +104,7 @@ class socketServerSelect
             if (in_array($this->serverSocket, $readFds)) {
                 /**
                  * 1、处理新客户端的连接，此处并不会阻塞等待连接，因为已经有待处理的连接了。
-                 * 2、如果多个连接同时达到，那么只会一个一个的接收，比如10个客户端同时发起连接请求，
+                 * 2、如果多个连接同时达到，内核采用队列来缓存它们，accept方法会一个一个的出队列，比如10个客户端同时发起连接请求，
                  * 第一次select，$readFds中有一个serverSocket对象，调用socket_accept接收第一个连接请求,其他9个请求处于等待状态。
                  * 第二次select，$readFds中有一个serverSocket对象，调用socket_accept接收第二个连接请求,其他8个请求处于等待状态。
                  * ......
@@ -132,7 +136,7 @@ class socketServerSelect
                             $this->deleteConn((int)$fd);
                         } elseif ($buf === '') {
                             /**
-                             * 如果客户端正常断开(客户端调用socket_close)，socket_read会返回空字符串，表示有状态更新可读，也就是说客户端正常断开，服务器会有感知。
+                             * 如果客户端正常断开(客户端调用socket_close)，socket_read会返回空字符串，表示有状态更新可读。
                              * 也不排除在线的客户端发送的空字符串。
                              *
                              * 基于此，我们规定客户端不能发送空字符串。
@@ -149,8 +153,7 @@ class socketServerSelect
                     }
                 }
             }
-
-        } while (true);
+        }
     }
 
     public function read($socket, $len)
@@ -180,6 +183,13 @@ class socketServerSelect
         }
 
         return false;
+    }
+
+    public function getClientInfo($socketId)
+    {
+        // 获取客户端信息
+        socket_getpeername($this->clients[$socketId], $addr, $port);
+        return ['ip'=>$addr, 'port'=>$port];
     }
 
     public function formatHttp($data)
