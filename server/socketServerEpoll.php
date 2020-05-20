@@ -9,7 +9,7 @@
 
 set_time_limit(0);
 
-require_once __DIR__ . '/connectionManager.php';
+require_once __DIR__ . '/../lib/connectionManager.php';
 
 class socketServerEpoll
 {

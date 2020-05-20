@@ -7,7 +7,7 @@
 
 error_reporting(E_ALL);
 set_time_limit(0);
-require_once __DIR__ . '/socketClientBase.php';
+require_once __DIR__ . '/../lib/socketClientBase.php';
 
 class socketClientNIO extends socketClientBase
 {

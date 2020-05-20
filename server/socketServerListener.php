@@ -15,21 +15,24 @@
  *  EventUtil：助手类
  */
 
+require_once __DIR__ . '/../lib/connectionManager.php';
+
 class MyListenerConnection
 {
-    private $bev;
-    private $base;
+    public $bev;
+    public $base;
+    public $fd;
 
     public function __construct($base, $fd)
     {
         $this->base = $base;
-
+        $this->fd = $fd;
         /**
          * 创建BufferEvent对象
          * 此对象内置了读写事件处理器，但并没有添加到I/O事件池中
          * 同时该对象分别创建input/outpu对象【内置创建】主要用于数据读写【接收和发送】
          */
-        $this->bev = new EventBufferEvent($base, $fd, EventBufferEvent::OPT_CLOSE_ON_FREE);
+        $this->bev = new EventBufferEvent($base, $this->fd, EventBufferEvent::OPT_CLOSE_ON_FREE);
 
         //设置可读回调，异常回调，不需要可写回调
         $this->bev->setCallbacks(
@@ -77,6 +80,7 @@ class MyListenerConnection
      */
     public function __destruct()
     {
+        connectionManager::del((int)$this->fd);
         $this->bev->free();
     }
 }
@@ -86,7 +90,6 @@ class MyListener
     public $base;
     public $listener;
     public $socket;
-    private $conn = [];
 
     public function __construct($port)
     {
@@ -153,7 +156,8 @@ class MyListener
      */
     public function acceptConnCallback($listener, $fd, $address, $ctx)
     {
-        $this->conn[] = new MyListenerConnection($this->base, $fd);
+        $connection = new MyListenerConnection($this->base, $fd);
+        connectionManager::add((int)$fd, $connection);
     }
 
     /**
@@ -197,7 +201,8 @@ class MyListener
      */
     public function __destruct()
     {
-        foreach ($this->conn as &$c) {
+        $allConnection = connectionManager::getAll();
+        foreach ($allConnection as &$c) {
             $c = NULL;
         }
     }
