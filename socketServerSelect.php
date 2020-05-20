@@ -161,7 +161,7 @@ class socketServerSelect
         $getMsg = '';
 
         do {
-            $out = socket_read($socket, $len);
+            $out = @socket_read($socket, $len);
             if ($out === false) {
                 return false;
             }

@@ -3,19 +3,19 @@
  * 服务端
  *
  * 非阻塞式 + 同步 + IO多路复用器epoll
+ *
+ * Event的callback的参数是什么呢？ 参考官方手册 https://www.php.net/manual/zh/event.callbacks.php
  */
 
 set_time_limit(0);
 
+require_once __DIR__ . '/connectionManager.php';
+
 class socketServerEpoll
 {
-    public $len = 8129;// 每次读取数据的字节数
     public $events = [];
-    public $eventArr = [];
     public $serverSocket;
     public $settings = [];
-    public $clients = [];// 连接的客户端fd
-    public $eventConfig;
     public $eventBase;
 
     public function __construct($host, $port)
@@ -79,73 +79,115 @@ class socketServerEpoll
 
     public function start()
     {
-        $this->eventConfig = new EventConfig();
-        $this->eventBase   = new EventBase($this->eventConfig);
+        $this->eventBase   = new EventBase();
 
         echo '当前系统上Libevent支持的IO多路复用器：' . PHP_EOL;
         print_r(Event::getSupportedMethods());
         echo '正在使用的是：' . $this->eventBase->getMethod() . PHP_EOL;
 
-        $event = new Event($this->eventBase, $this->serverSocket, Event::READ | Event::PERSIST, $this->eventOnConnect());
+        $event = new Event(
+            $this->eventBase,
+            $this->serverSocket,
+            Event::READ | Event::PERSIST,
+            [$this, 'callbackOnConnect']
+        );
         $event->add();
         $this->eventBase->loop();
     }
 
-    public function eventOnConnect()
+    /**
+     * @param $fd    resource   发生事件的fd，此处就是监听fd
+     * @param $what  int        事件类型，此处为2
+     * @param $arg   mixed      实例化Event的最后一个参数
+     */
+    public function callbackOnConnect($fd, $what, $arg)
     {
-        return function () {
-            // 连接管理
-            $conn = socket_accept($this->serverSocket);
-            if ($conn === false) {
-                echo socket_strerror(socket_last_error()) . PHP_EOL;
-            } else {
-                socket_set_nonblock($conn);
-                $no                 = (int)$conn;
-                $this->clients[$no] = $conn;
-
-                if (isset($this->events['connect']) && $conn) {
-                    call_user_func($this->events['connect'], $this, $no);
-                }
-
-                // 为每个连接创建读事件
-                $e = new Event($this->eventBase, $conn, Event::READ | Event::PERSIST, $this->eventOnRead($conn));
-                $e->add();
-
-                // 将 conn -> event 保存下来
-                $this->eventArr[(int)$conn] = $e;
+        $conn = socket_accept($this->serverSocket);
+        if ($conn === false) {
+            echo socket_strerror(socket_last_error()) . PHP_EOL;
+        } else {
+            $connection = new connection($conn, $this->eventBase, $this->events);
+            connectionManager::add((int)$conn, $connection);
+            $connection->event->add();
+            if (isset($this->events['connect']) && $conn) {
+                call_user_func($this->events['connect'], $this, $conn);
             }
-        };
+        }
     }
 
-    public function eventOnRead($conn)
+    // 获取客户端信息
+    public function getClientInfo($fd)
     {
-        return function () use ($conn) {
-            $buf = $this->read($conn, $this->len);
-            if ($buf === false) {
-                $this->deleteConn((int)$conn);
-            } elseif ($buf === '') {
-                /**
-                 * 如果客户端正常断开(客户端调用socket_close)，socket_read会返回空字符串，表示有状态更新可读。
-                 * 也不排除在线的客户端发送的空字符串。
-                 *
-                 * 基于此，我们规定客户端不能发送空字符串。
-                 */
-
-                $this->deleteConn((int)$conn);
-            } else {
-                if (isset($this->events['receive'])) {
-                    call_user_func($this->events['receive'], $this, (int)$conn, $buf);
-                }
-            }
-        };
+        socket_getpeername($fd, $addr, $port);
+        return ['ip' => $addr, 'port' => $port];
     }
 
-    public function read($socket, $len)
+    public function __destruct()
+    {
+        @socket_close($this->serverSocket);
+        $allConnection = connectionManager::getAll();
+        foreach ($allConnection as &$c) {
+            $c = NULL;
+        }
+    }
+}
+
+class connection
+{
+    public $len = 8129;
+    public $events = [];
+    public $event;
+    public $eventBase;
+    public $fd;
+
+    public function __construct($fd, $eventBase, $events)
+    {
+        socket_set_nonblock($fd);
+        $this->eventBase = $eventBase;
+        $this->fd = $fd;
+        $this->events = $events;
+        $this->addEvent();
+    }
+
+    public function addEvent()
+    {
+        // 为每个连接创建读事件
+        $this->event = new Event(
+            $this->eventBase,
+            $this->fd,
+            Event::READ | Event::PERSIST,
+            [$this, 'callbackOnRead']
+        );
+
+        // ！！！如果放在此处的话，那么效果就是先 EPOLL_CTL_ADD 然后被 EPOLL_CTL_DEL，所以要放在外面
+        // $this->event->add();
+    }
+
+    /**
+     * @param $fd    resource   发生事件的fd，此处就是客户端fd
+     * @param $what  int        事件类型，此处为2
+     * @param $arg   mixed      实例化Event的最后一个参数
+     */
+    public function callbackOnRead($fd, $what, $arg)
+    {
+        $buf = $this->read($this->len);
+        if ($buf === false) {
+            $this->__destruct();
+        } elseif ($buf === '') {
+            $this->__destruct();
+        } else {
+            if (isset($this->events['receive'])) {
+                call_user_func($this->events['receive'], $this, $buf);
+            }
+        }
+    }
+
+    public function read($len)
     {
         $getMsg = '';
 
         do {
-            $out = socket_read($socket, $len);
+            $out = socket_read($this->fd, $len);
             if ($out === false) {
                 return false;
             }
@@ -158,22 +200,13 @@ class socketServerEpoll
         return $getMsg;
     }
 
-    public function send($socketId, $data)
+    public function send($data)
     {
-        if (isset($this->clients[$socketId]) && is_resource($this->clients[$socketId])) {
-            if (@socket_write($this->clients[$socketId], $data, strlen($data)) !== false) {
-                return true;
-            }
+        if (@socket_write($this->fd, $data, strlen($data)) !== false) {
+            return true;
         }
 
         return false;
-    }
-
-    public function getClientInfo($socketId)
-    {
-        // 获取客户端信息
-        socket_getpeername($this->clients[$socketId], $addr, $port);
-        return ['ip' => $addr, 'port' => $port];
     }
 
     public function formatHttp($data)
@@ -196,46 +229,55 @@ class socketServerEpoll
         return $ret;
     }
 
-    public function deleteConn($socketId)
+    public function deleteConn()
     {
-        @socket_shutdown($this->clients[$socketId]);
-        @socket_close($this->clients[$socketId]);
-        unset($this->clients[$socketId]);
+        @socket_shutdown($this->fd);
+        @socket_close($this->fd);
+        connectionManager::del((int)$this->fd);
+
+        /**
+         * free() 包含了del()并释放了分配给当前Event的资源
+         * del() 会发起系统调用 EPOLL_CTL_DEL
+         *
+         * !!! 必须调用 EPOLL_CTL_DEL 来将当前fd(比如7fd)从"fd池"中移除。
+         */
+        $this->event->free();
         if (isset($this->events['close'])) {
-            call_user_func($this->events['close'], $this, $socketId);
+            call_user_func($this->events['close'], $this);
         }
     }
 
     public function __destruct()
     {
-        @socket_close($this->serverSocket);
+        $this->deleteConn();
     }
 }
 
 $socketServer = new socketServerEpoll('0.0.0.0', 8888);
 
-$socketServer->on('connect', function ($socketServer, $socketId) {
-    echo 'connect in...' . $socketId . PHP_EOL;
+$socketServer->on('connect', function ($socketServer, $fd) {
+    echo 'connect in...' . (int)$fd . PHP_EOL;
 });
 
-$socketServer->on('receive', function ($socketServer, $socketId, $data) {
+$socketServer->on('receive', function ($connection, $data) {
     echo '[read] ';
-    echo 'receive data : ' . $data . ' from ' . $socketId . PHP_EOL;
+    echo 'receive data : ' . $data . ' from ' . (int)$connection->fd . PHP_EOL;
 
-    $msg = $socketServer->formatHttp('I am server...');
-    $re  = $socketServer->send($socketId, $msg);
+    $msg = $connection->formatHttp('I am server...');
+    $re  = $connection->send($msg);
     if ($re) {
-        echo 'response to ' . $socketId . PHP_EOL;
+        echo 'response to ' . (int)$connection->fd . PHP_EOL;
     } else {
-        $socketServer->deleteConn($socketId);
+        $connection->deleteConn();
     }
 
     // 模拟Http服务器
     //$socketServer->deleteConn($socketId);
 });
 
-$socketServer->on('close', function ($socketServer, $socketId) {
-    echo 'client close...' . $socketId . PHP_EOL;
+$socketServer->on('close', function ($connection) {
+    echo 'client close...' . (int)$connection->fd . PHP_EOL;
 });
+
 // 启动服务器
 $socketServer->start();
