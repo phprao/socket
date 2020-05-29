@@ -8,6 +8,7 @@
 error_reporting(E_ALL);
 set_time_limit(0);
 require_once __DIR__ . '/../lib/socketClientBase.php';
+require_once __DIR__ . '/../lib/socketHelper.php';
 
 class socketClientNIO extends socketClientBase
 {
@@ -35,26 +36,26 @@ class socketClientNIO extends socketClientBase
 try {
 
     $clients = [];
-    $dests = [
+    $dests   = [
         ['127.0.0.1', 8888],
         ['127.0.0.1', 8888],
         ['127.0.0.1', 8888],
     ];
 
-    foreach($dests as $k => $v){
+    foreach ($dests as $k => $v) {
         $socketClient = (new socketClientNIO())->connectTo($v[0], $v[1]);
-        $socketClient->send('name');
+        socketHelper::send($socketClient->socket, 'name');
         $clients[$k] = $socketClient;
     }
 
-    while(!empty($clients)){
-        foreach ($clients as $k => $v){
-            $data = $v->read();
-            if($data === ''){
+    while (!empty($clients)) {
+        foreach ($clients as $k => $v) {
+            $data = socketHelper::read($v->socket, $v->len);
+            if ($data === '') {
                 unset($clients[$k]);
-            }elseif($data === false){
+            } elseif ($data === false) {
                 continue;
-            }else{
+            } else {
                 print_r($data . PHP_EOL);
                 unset($clients[$k]);
             }

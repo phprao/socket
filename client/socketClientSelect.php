@@ -8,6 +8,7 @@
 error_reporting(E_ALL);
 set_time_limit(0);
 require_once __DIR__ . '/../lib/socketClientBase.php';
+require_once __DIR__ . '/../lib/socketHelper.php';
 
 class socketClientSelect extends socketClientBase
 {
@@ -30,61 +31,75 @@ class socketClientSelect extends socketClientBase
     }
 }
 
-/*************************************************************************************/
+class selectManager
+{
+    public $dests = [];
+    public $clients = [];
+    public $fds = [];
 
-try {
-
-    $clients      = [];
-    $readFdsInit  = [];
-    $readFds      = [];
-    $writeFds     = null;
-    $exceptionFds = null;
-    $dests        = [
-        ['127.0.0.1', 8888],
-        ['127.0.0.1', 8888],
-        ['127.0.0.1', 8888],
-    ];
-
-    $setting = [
+    public $setting = [
         // 允许等待连接的请求数
         'backlog' => 128,
 
         /**
          * 每次select阻塞等待多少秒，获取在这段时间内的状态变化；
          *
-         * 0表示不等待，获取这个时刻的状态变化；
-         * NULL表示阻塞等待直到有返回。
+         * 0表示不等待，获取这个时刻的状态变化，CPU占用率将暴增，禁止使用；
+         * NULL表示阻塞等待直到有返回，建议使用。
          */
         'timeout' => null,
     ];
 
-    foreach ($dests as $k => $v) {
-        $socketClient = (new socketClientSelect())->connectTo($v[0], $v[1]);
-        $len = $socketClient->send('name');
-        var_dump($len);
-        $clients[(int)$socketClient->socket] = $socketClient;
-        $readFdsInit[(int)$socketClient->socket] = $socketClient->socket;
+    public function __construct(array $dests)
+    {
+        $this->dests = $dests;
+        $this->action();
     }
 
-    while (!empty($clients)) {
-        $readFds = $readFdsInit;
-        $ret     = socket_select($readFds, $writeFds, $exceptionFds, $setting['timeout']);
-        if ($ret < 1 || empty($readFds)) {
-            continue;
+    public function action()
+    {
+        foreach ($this->dests as $k => $v) {
+            $socketClient = (new socketClientSelect())->connectTo($v[0], $v[1]);
+            socketHelper::send($socketClient->socket, 'name');
+            $this->clients[(int)$socketClient->socket] = $socketClient; // 否则$socketClient就会被释放
+            $this->fds[(int)$socketClient->socket] = $socketClient->socket;
         }
 
-        foreach ($readFds as $fd) {
-            $obj = $clients[(int)$fd];
-            $buf = $obj->read();
-            if ($buf) {
-                echo 'fd: ' . (int)$fd . PHP_EOL;
-                print_r($buf . PHP_EOL);
+        while (!empty($this->fds)) {
+            $writeFds     = null;
+            $exceptionFds = null;
+            $readFds      = $this->fds;
+
+            $ret = socket_select($readFds, $writeFds, $exceptionFds, $this->setting['timeout']);
+            if ($ret < 1 || empty($readFds)) {
+                continue;
             }
 
-            unset($clients[(int)$fd]);
-            unset($readFdsInit[(int)$fd]);
+            foreach ($readFds as $fd) {
+                $buf = socketHelper::read($fd);
+                if ($buf) {
+                    echo 'fd: ' . (int)$fd . PHP_EOL;
+                    print_r($buf . PHP_EOL);
+                }
+
+                unset($this->fds[(int)$fd]);
+                socketHelper::close($fd);
+            }
         }
     }
+}
+
+/*************************************************************************************/
+
+try {
+
+    $dests = [
+        ['127.0.0.1', 8888],
+        ['127.0.0.1', 8888],
+        ['127.0.0.1', 8888],
+    ];
+
+    new selectManager($dests);
 
 } catch (\Exception $e) {
     die($e->getMessage());

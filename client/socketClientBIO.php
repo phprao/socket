@@ -8,6 +8,7 @@
 error_reporting(E_ALL);
 set_time_limit(0);
 require_once __DIR__ . '/../lib/socketClientBase.php';
+require_once __DIR__ . '/../lib/socketHelper.php';
 
 class socketClientBIO extends socketClientBase
 {
@@ -32,9 +33,8 @@ class socketClientBIO extends socketClientBase
 try {
     $socketClient = new socketClientBIO();
     $socketClient->connectTo('127.0.0.1', 8888);
-    $re = $socketClient->send('name');
-var_dump($re);
-    $data = $socketClient->read();
+    socketHelper::send($socketClient->socket, 'name');
+    $data = socketHelper::read($socketClient->socket, $socketClient->len);
     print_r($data . PHP_EOL);
 } catch (\Exception $e) {
     die($e->getMessage());

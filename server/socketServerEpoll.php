@@ -10,76 +10,21 @@
 set_time_limit(0);
 
 require_once __DIR__ . '/../lib/connectionManager.php';
+require_once __DIR__ . '/../lib/socketServerBase.php';
+require_once __DIR__ . '/../lib/socketHelper.php';
 
-class socketServerEpoll
+class socketServerEpoll extends socketServerBase
 {
-    public $events = [];
-    public $serverSocket;
-    public $settings = [];
     public $eventBase;
 
     public function __construct($host, $port)
     {
-        $this->initSettings();
-        $this->createServer($host, $port);
-    }
-
-    protected function initSettings()
-    {
-        $this->settings = [
-            // 允许等待连接的请求数
-            'backlog' => 128,
-
-            /**
-             * 每次select阻塞等待多少秒，获取在这段时间内的状态变化；
-             * 0表示不等待，获取这个时刻的状态变化；
-             * NULL表示阻塞等待直到有返回。
-             */
-            'timeout' => 3,
-        ];
-    }
-
-    public function set($settings)
-    {
-        $this->settings = $settings;
-    }
-
-    public function on($event, $callback)
-    {
-        $this->events[$event] = $callback;
-    }
-
-    protected function createServer($host, $port)
-    {
-        // 1. 创建
-        if (($sock = socket_create(AF_INET, SOCK_STREAM, SOL_TCP)) == false) {
-            throw new \Exception(socket_strerror(socket_last_error()), socket_last_error());
-        } else {
-            $this->serverSocket = $sock;
-        }
-
-        // 2. 绑定
-        if (socket_bind($this->serverSocket, $host, $port) == false) {
-            throw new \Exception(socket_strerror(socket_last_error()), socket_last_error());
-        }
-
-        // 将服务的socket设置为非阻塞
-        socket_set_nonblock($this->serverSocket);
-
-        // 设置端口重用，否则每次重启要等待1-2分钟
-        socket_get_option($this->serverSocket, SOL_SOCKET, SO_REUSEADDR);
-
-        // 3. 监听
-        if (socket_listen($this->serverSocket, $this->settings['backlog']) == false) {
-            throw new \Exception(socket_strerror(socket_last_error()), socket_last_error());
-        }
-
-        return true;
+        parent::__construct($host, $port);
     }
 
     public function start()
     {
-        $this->eventBase   = new EventBase();
+        $this->eventBase = new EventBase();
 
         echo '当前系统上Libevent支持的IO多路复用器：' . PHP_EOL;
         print_r(Event::getSupportedMethods());
@@ -96,12 +41,14 @@ class socketServerEpoll
     }
 
     /**
-     * @param $fd    resource   发生事件的fd，此处就是监听fd
+     * @param $fd    mixed      发生事件的fd，此处就是监听fd，就是$this->serverSocket
      * @param $what  int        事件类型，此处为2
      * @param $arg   mixed      实例化Event的最后一个参数
      */
     public function callbackOnConnect($fd, $what, $arg)
     {
+        //var_dump($fd); var_dump($this->serverSocket);
+
         $conn = socket_accept($this->serverSocket);
         if ($conn === false) {
             echo socket_strerror(socket_last_error()) . PHP_EOL;
@@ -115,16 +62,9 @@ class socketServerEpoll
         }
     }
 
-    // 获取客户端信息
-    public function getClientInfo($fd)
-    {
-        socket_getpeername($fd, $addr, $port);
-        return ['ip' => $addr, 'port' => $port];
-    }
-
     public function __destruct()
     {
-        @socket_close($this->serverSocket);
+        parent::__destruct();
         $allConnection = connectionManager::getAll();
         foreach ($allConnection as &$c) {
             $c = NULL;
@@ -144,8 +84,8 @@ class connection
     {
         socket_set_nonblock($fd);
         $this->eventBase = $eventBase;
-        $this->fd = $fd;
-        $this->events = $events;
+        $this->fd        = $fd;
+        $this->events    = $events;
         $this->addEvent();
     }
 
@@ -164,13 +104,15 @@ class connection
     }
 
     /**
-     * @param $fd    resource   发生事件的fd，此处就是客户端fd
-     * @param $what  int        事件类型，此处为2
+     * @param $fd    mixed      发生事件的fd，此处就是连接fd，此fd与客户端通讯
+     * @param $what  int        事件类型，此处为2 -> Event::READ
      * @param $arg   mixed      实例化Event的最后一个参数
      */
     public function callbackOnRead($fd, $what, $arg)
     {
-        $buf = $this->read($this->len);
+        //var_dump($fd); var_dump($this->fd);
+
+        $buf = socketHelper::read($fd, $this->len);
         if ($buf === false) {
             $this->__destruct();
         } elseif ($buf === '') {
@@ -182,64 +124,17 @@ class connection
         }
     }
 
-    public function read($len)
-    {
-        $getMsg = '';
-
-        do {
-            $out = socket_read($this->fd, $len);
-            if ($out === false) {
-                return false;
-            }
-            $getMsg .= $out;
-            if (strlen($out) < $len) {
-                break;
-            }
-        } while (true);
-
-        return $getMsg;
-    }
-
-    public function send($data)
-    {
-        if (@socket_write($this->fd, $data, strlen($data)) !== false) {
-            return true;
-        }
-
-        return false;
-    }
-
-    public function formatHttp($data)
-    {
-        /**
-         * HTTP/1.1 200 OK
-         * Date: Fri, 01 May 2020 12:00:57 GMT
-         * Connection: close
-         * X-Powered-By: PHP/7.2.27
-         * Content-type: text/html; charset=UTF-8
-         */
-        $ret = "HTTP/1.1 200 OK\r\n";
-        $ret .= "Date: " . gmdate("D, d M Y H:i:s", time()) . " GMT\r\n";
-        $ret .= "Connection: close\r\n";
-        $ret .= "Content-type: text/html; charset=UTF-8\r\n";
-        $ret .= "Content-Length: " . strlen($data) . "\r\n\r\n";
-
-        $ret .= $data;
-
-        return $ret;
-    }
-
     public function deleteConn()
     {
         @socket_shutdown($this->fd);
         @socket_close($this->fd);
-        connectionManager::del((int)$this->fd);
+        connectionManager::del($this->fd);
 
         /**
          * free() 包含了del()并释放了分配给当前Event的资源
-         * del() 会发起系统调用 EPOLL_CTL_DEL
+         * del() 会将注册在应用程序的事件移除并发起系统调用 EPOLL_CTL_DEL
          *
-         * !!! 必须调用 EPOLL_CTL_DEL 来将当前fd(比如7fd)从"fd池"中移除。
+         * !!! 这是必须的。
          */
         $this->event->free();
         if (isset($this->events['close'])) {
@@ -263,8 +158,7 @@ $socketServer->on('receive', function ($connection, $data) {
     echo '[read] ';
     echo 'receive data : ' . $data . ' from ' . (int)$connection->fd . PHP_EOL;
 
-    $msg = $connection->formatHttp('I am server...');
-    $re  = $connection->send($msg);
+    $re = socketHelper::httpSend($connection->fd, 'I am server...' . PHP_EOL);
     if ($re) {
         echo 'response to ' . (int)$connection->fd . PHP_EOL;
     } else {
@@ -272,7 +166,7 @@ $socketServer->on('receive', function ($connection, $data) {
     }
 
     // 模拟Http服务器
-    //$socketServer->deleteConn($socketId);
+    $connection->deleteConn();
 });
 
 $socketServer->on('close', function ($connection) {

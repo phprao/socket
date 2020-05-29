@@ -4,7 +4,7 @@
  *
  * 非阻塞式 + 同步 + IO多路复用器epoll
  *
- * 这是官网的demo
+ * 这是官网的demo改造的
  * https://www.php.net/manual/zh/eventlistener.construct.php
  *
  * 用到的类
@@ -13,9 +13,11 @@
  *  EventBufferEvent：封装了Libevent's buffer event，对于连接的读写操作。
  *  Event：事件
  *  EventUtil：助手类
+ * EventBuffer：buffered IO
  */
 
 require_once __DIR__ . '/../lib/connectionManager.php';
+require_once __DIR__ . '/../lib/socketHelper.php';
 
 class MyListenerConnection
 {
@@ -26,43 +28,55 @@ class MyListenerConnection
     public function __construct($base, $fd)
     {
         $this->base = $base;
-        $this->fd = $fd;
+        $this->fd   = $fd;
         /**
          * 创建BufferEvent对象
-         * 此对象内置了读写事件处理器，但并没有添加到I/O事件池中
+         * 此对象内置了读写事件处理器，但并没有添加到事件循环队列中
          * 同时该对象分别创建input/outpu对象【内置创建】主要用于数据读写【接收和发送】
          */
         $this->bev = new EventBufferEvent($base, $this->fd, EventBufferEvent::OPT_CLOSE_ON_FREE);
 
-        //设置可读回调，异常回调，不需要可写回调
+        /**
+         * 设置回调
+         * 1、readcb：读就绪事件发生后，内置的读事件处理器运行读取数据，然后会调用此函数。
+         * 2、writecb：内置的写事件处理器将数据发送出去后会调用此函数。
+         * 3、eventcb：特殊情况下会触发的事件，比如主动客户端断开。
+         */
         $this->bev->setCallbacks(
-            [$this, "echoReadCallback"],
-            NULL,
+            [$this, "readEventCallback"],
+            [$this, "writeEventCallback"],
             [$this, "echoEventCallback"],
             NULL
         );
 
-        //将内置的写事件处理器添加到I/O事件池中，并且向内核事件表注册读就绪事件
+        //将内置的写事件处理器添加到事件循环队列中，并且向内核事件表注册读就绪事件
         if (!$this->bev->enable(Event::READ)) {
             echo "Failed to enable READ\n";
             return;
         }
     }
 
-    /**
-     * 可读回调
-     *
-     * 读就绪事件发生后，内置的读事件处理器运行，然后运行此函数
-     * 同时调用output，并把input【内置的读事件处理器读取的数据会放入到此input对象中】
-     * 直接将接受的数据写入到客户端
-     */
-    public function echoReadCallback($bev, $ctx)
+    public function readEventCallback($bev, $ctx)
     {
-        $bev->output->addBuffer($bev->input);
+        // echo 服务器响应
+        //$bev->output->addBuffer($bev->input);
+
+        // http 服务器响应
+        $response = socketHelper::formatHttp('I am server...' . PHP_EOL);
+        $buffer   = new EventBuffer();
+        $buffer->add($response);
+        $bev->output->addBuffer($buffer);
+    }
+
+    public function writeEventCallback($bev, $ctx)
+    {
+        // 模拟http服务
+        $this->__destruct();
     }
 
     /**
-     * 异常回调
+     * 事件回调
+     * 1、客户端主动断开会有READ事件，但是读到的为空，会触发 EventBufferEvent::EOF
      */
     public function echoEventCallback($bev, $events, $ctx)
     {
@@ -75,12 +89,11 @@ class MyListenerConnection
         }
     }
 
-    /**
-     * 将读写和异常回调清空同时释放BufferEvent相关内置的数据
-     */
     public function __destruct()
     {
-        connectionManager::del((int)$this->fd);
+        @socket_shutdown($this->fd);
+        @socket_close($this->fd);
+        connectionManager::del($this->fd);
         $this->bev->free();
     }
 }
@@ -121,9 +134,10 @@ class MyListener
          * 创建socket并监听，同时将此socket的读就绪事件注册到【经过I/O复用函数即事件多路分发器EventDemultiplexer管理】
          * 此socket 内置了监听事件处理器，客户端连接后，会调用此事件处理器，然后再运行用户设置的回调函数acceptConnCallBack函数
          * EventListener::OPT_CLOSE_ON_FREE | EventListener::OPT_REUSEABLE 标志位
-         * EventListener::OPT_CLOSE_ON_FREE 此参数会关闭低层连接socket
-         * EventListener::OPT_REUSEABLE 和前面说过的socket 选项有关【不清楚请翻阅之前我写过的东西】
-         * 后面2个参数为ip和端口用于生成socket
+         * EventListener::OPT_CLOSE_ON_FREE 如果EventListener对象被释放了会关闭低层连接socket
+         * EventListener::OPT_REUSEABLE  端口复用
+         *
+         * backlog：等待accept的连接的个数。
          */
         $this->listener = new EventListener(
             $this->base,
@@ -141,7 +155,7 @@ class MyListener
 
         /**
          * 设置此socket事件处理器的错误回调
-         * 函数圆形标记错误，应该是  callable $cb
+         * 函数原型标记错误，应该是  callable $cb
          */
         $this->listener->setErrorCallback([$this, "acceptErrorCallback"]);
     }
@@ -150,8 +164,8 @@ class MyListener
      * 连接建立后回调
      *
      * @param $listener EventListener   监听器
-     * @param $fd       resource        连接资源
-     * @param $address  string          客户端地址信息
+     * @param $fd       mixed           连接资源
+     * @param $address  array           客户端地址信息
      * @param $ctx      mixed           传递的参数
      */
     public function acceptConnCallback($listener, $fd, $address, $ctx)
@@ -175,7 +189,7 @@ class MyListener
             EventUtil::getLastSocketError()
         );
 
-        // 经过多少秒之后停止时间循环loop
+        // 经过多少秒之后停止事件循环loop
         $this->base->exit(NULL);
     }
 
@@ -186,12 +200,12 @@ class MyListener
          * 主要是调用如epoll的epoll_wait函数进行监听
          * 当任意I/O产生了就绪事件则会通知此进程
          * 此进程将会遍历就绪的I/O事件读取文件描述符
-         * 并从I/O事件处理器池读取对应的事件处理器队链
+         * 并从I/O事件处理器池读取对应的事件处理器队列
          * 再将事件处理器插入到请求队列中
          * 两从请求队列中获取到事件并循环一一处理
          * 从而运行指定的回调函数
          *
-         * 启动时间循环，等同于不传参数的loop()
+         * 启动事件循环，等同于不传参数的loop()
          */
         $this->base->dispatch();
     }
@@ -219,8 +233,4 @@ if ($port <= 0 || $port > 65535) {
 
 $l = new MyListener($port);
 
-/**
- * event_base_loop持续阻塞
- * 直到内核事件表中的I/O事件就绪产生才会运行相对的回调函数
- */
 $l->dispatch();

@@ -54,35 +54,6 @@ class socketClientBase
         return $this;
     }
 
-    public function read()
-    {
-        $getMsg = '';
-
-        do {
-            $out = @socket_read($this->socket, $this->len);
-            if ($out === false) {
-                return false;
-            }
-            $getMsg .= $out;
-            if (strlen($out) < $this->len) {
-                break;
-            }
-        } while (true);
-
-        return $getMsg;
-    }
-
-    public function send($msg)
-    {
-        // 发送指令
-        $ret = @socket_write($this->socket, $msg, strlen($msg));
-        if ($ret === false) {
-            throw new \Exception(socket_strerror(socket_last_error()), socket_last_error());
-        }
-
-        return $ret;
-    }
-
     public function setClientAddr($addr, $port)
     {
         // 客户端的端口号默认是随机的，也可以指定某个端口号，如果端口已被占用了会bind失败，继而会使用随机端口
