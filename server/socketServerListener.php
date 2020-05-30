@@ -56,8 +56,23 @@ class MyListenerConnection
         }
     }
 
+    protected function getEventBufferData($eventBuffer)
+    {
+        $str = '';
+        while ($s = $eventBuffer->read(8192)) {
+            $str .= $s;
+        }
+
+        return $str;
+    }
+
     public function readEventCallback($bev, $ctx)
     {
+        echo '收到数据：'.PHP_EOL;
+        $str = $this->getEventBufferData($bev->input);
+        echo $str;
+        echo PHP_EOL;
+
         // echo 服务器响应
         //$bev->output->addBuffer($bev->input);
 

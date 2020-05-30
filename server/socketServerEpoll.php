@@ -155,7 +155,6 @@ $socketServer->on('connect', function ($socketServer, $fd) {
 });
 
 $socketServer->on('receive', function ($connection, $data) {
-    echo '[read] ';
     echo 'receive data : ' . $data . ' from ' . (int)$connection->fd . PHP_EOL;
 
     $re = socketHelper::httpSend($connection->fd, 'I am server...' . PHP_EOL);
