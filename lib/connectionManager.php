@@ -15,17 +15,36 @@ class connectionManager
 
     public static function add($fd, $connection)
     {
-        self::$connetion[(int)$fd] = $connection;
+        if(is_int($fd)){
+            $no = $fd;
+        }else{
+            $no = (int)$fd;
+        }
+        self::$connetion[$no] = $connection;
+
+        return true;
     }
 
     public static function del($fd)
     {
-        unset(self::$connetion[(int)$fd]);
+        if(is_int($fd)){
+            $no = $fd;
+        }else{
+            $no = (int)$fd;
+        }
+        unset(self::$connetion[$no]);
+
+        return true;
     }
 
     public static function get($fd)
     {
-        return self::$connetion[(int)$fd];
+        if(is_int($fd)){
+            $no = $fd;
+        }else{
+            $no = (int)$fd;
+        }
+        return self::$connetion[$no];
     }
 
     public static function getAll()
